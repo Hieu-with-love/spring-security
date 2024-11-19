@@ -2,13 +2,20 @@ package com.exam.spring_security.config;
 
 import com.exam.spring_security.model.Customer;
 import com.exam.spring_security.repository.UserInfoRepository;
+import com.exam.spring_security.service.impl.CustomerUserDetailsService;
 import com.exam.spring_security.service.impl.UserInfoService;
+import com.exam.spring_security.service.impl.UserServiceImpl;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
+import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.Customizer;
+import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.authentication.configuration.GlobalAuthenticationConfigurerAdapter;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -20,48 +27,57 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
 
+import java.util.ArrayList;
+import java.util.List;
+
 @Configuration
 @EnableWebSecurity
 @RequiredArgsConstructor
 public class SecurityConfig {
     private final UserInfoRepository userInfoRepository;
+    private final CustomerUserDetailsService userDetailsService;
     private final String[] PUBLIC_ENDPOINTS = {"/register", "/user/home", "/forgot-password"};
 
     @Bean
-    public UserDetailsService userDetailsService(){
-        return new UserInfoService(userInfoRepository);
+    public DaoAuthenticationProvider authProvider() {
+        DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider();
+        authProvider.setUserDetailsService(userDetailsService);
+        authProvider.setPasswordEncoder(passwordEncoder());
+        return authProvider;
+    }
+
+    protected void configure(AuthenticationManagerBuilder auth) throws Exception {
+        auth.userDetailsService(userDetailsService)
+                .passwordEncoder(passwordEncoder());
     }
 
     @Bean
-    public AuthenticationProvider authenticationProvider() {
-        DaoAuthenticationProvider authenticationProvider = new DaoAuthenticationProvider();
-        authenticationProvider.setUserDetailsService(userDetailsService());
-        authenticationProvider.setPasswordEncoder(passwordEncoder());
-        return authenticationProvider;
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration authConfig) throws Exception {
+        List<GlobalAuthenticationConfigurerAdapter> configurers = new ArrayList<>();
+        configurers.add(new GlobalAuthenticationConfigurerAdapter() {
+            @Override
+            public void configure(AuthenticationManagerBuilder auth) throws Exception {
+                // auth dosomthing
+            }
+        });
+        return authConfig.getAuthenticationManager();
     }
-
-//    @Bean
-//    public UserDetailsService userDetailsService() {
-//        UserDetails admin = User.withUsername("hieu")
-//                .password(passwordEncoder().encode("123"))
-//                .roles("admin")
-//                .build();
-//        UserDetails user = User.withUsername("user")
-//                .password(passwordEncoder().encode("123"))
-//                .roles("user")
-//                .build();
-//        return new InMemoryUserDetailsManager(admin, user);
-//    }
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         return http.csrf(AbstractHttpConfigurer::disable)
-                .authorizeHttpRequests(request ->
-                        request.requestMatchers("/").permitAll()
-                                .requestMatchers("/user/new").permitAll()
-                                .requestMatchers("/customer/**").authenticated()
+                .authorizeHttpRequests(request -> request
+                        .requestMatchers("/").hasAnyAuthority("USER", "ADMIN", "EDITOR", "CREATOR")
+                        .requestMatchers("/new").hasAnyAuthority("ADMIN", "CREATOR")
+                        .requestMatchers("/edit").hasAnyAuthority("ADMIN")
+                        .requestMatchers("/api/auth/**").permitAll()
+                        .anyRequest().authenticated()
                 )
-                .formLogin(Customizer.withDefaults()).build();
+                .httpBasic(Customizer.withDefaults())
+                .formLogin(login -> login.loginPage("/login").permitAll())
+                .logout(logout -> logout.permitAll())
+                .exceptionHandling(h -> h.accessDeniedPage("/403"))
+                .build();
     }
 
     @Bean
